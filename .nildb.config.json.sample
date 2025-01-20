@@ -1,0 +1,13 @@
+{
+  "team": <team name>,
+  "schema_id": <schema id>,
+  "hosts": [
+    {
+      "name": <nildb node did>,
+      "url": <nildb node hostname>,
+      "bearer": <your jwt token>
+    },
+    ...
+  ],
+  "schema": <your json schema>
+}

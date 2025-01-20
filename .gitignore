@@ -1,0 +1,4 @@
+.venv/
+.env
+.nildb.config.json
+lib/__pycache__/
