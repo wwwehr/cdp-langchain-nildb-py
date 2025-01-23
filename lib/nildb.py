@@ -39,9 +39,11 @@ class NilDBAPI:
             {"nodes": [{}] * len(CONFIG["hosts"])}, {"store": True}
         )
 
-    def data_download(self) -> JSON_TYPE:
+    def data_download(self) -> Dict:
         """Download all records in the specified node and schema."""
         try:
+            shares = defaultdict(list)
+            teams = defaultdict(list)
             for idx, node in enumerate(self.nodes):
                 headers = {
                     "Authorization": f'Bearer {node["bearer"]}',
@@ -55,15 +57,32 @@ class NilDBAPI:
                     headers=headers,
                     json=body,
                 )
-                print(response.content)
                 assert (
                     response.status_code == 200
                 ), ("upload failed: " + response.content)
-            return True
-
+                data = response.json().get("data")
+                for i, d in enumerate(data):
+                    shares[i].append(d["text"]["$share"])
+                    teams[i].append(d["team"])
+            for i in range(len(teams)):
+                assert(teams[i][0] == teams[i][j] for j in range(1, len(teams[i])))
+                teams[i] = teams[i][0]
+            decrypted = []
+            for k in shares:
+                decrypted.append(nilql.decrypt(self.secret_key, shares[k]))
+            messages = {}
+            for team, message in zip(teams, decrypted):
+                if len(messages) == 2:
+                    break
+                if teams[team] == "blue":
+                    messages["blue"] = message
+                elif teams[team] == "red":
+                    messages["red"] = message
+            return messages
         except Exception as e:
-            print(f"Error creating records in node {idx}: {str(e)}")
-            return False
+            print(f"Error retrieving records in node {idx}: {str(e)}")
+            return {}
+
 
     def data_upload(self, payload: JSON_TYPE) -> bool:
         """Create/upload records in the specified node and schema."""
@@ -97,7 +116,6 @@ class NilDBAPI:
             print(f"Error creating records in node {idx}: {str(e)}")
             return False
 
-
 class NilDbUploadInput(BaseModel):
     text: str = Field(description="value to store")
 
@@ -111,7 +129,6 @@ class NilDbUploadTool(BaseTool):
     def _run(
         self, text: str, run_manager: Optional[CallbackManagerForToolRun] = None
     ) -> str:
-
         nildb = NilDBAPI()
         my_id = str(uuid.uuid4())
 
@@ -127,6 +144,9 @@ class NilDbUploadTool(BaseTool):
 class NilDbDownloadInput(BaseModel):
     pass
 
+class NilDbDownload(BaseModel):
+    text: str = Field(description="value to fetch")
+
 
 class NilDbDownloadTool(BaseTool):
     name: str = "nildb_download_tool"
@@ -134,8 +154,9 @@ class NilDbDownloadTool(BaseTool):
     args_schema: Type[BaseModel] = NilDbDownloadInput
     return_direct: bool = True
 
-    def _run(self, run_manager: Optional[CallbackManagerForToolRun] = None) -> str:
+    def _run(self, run_manager: Optional[CallbackManagerForToolRun] = None) -> Dict:
 
         nildb = NilDBAPI()
 
-        return "ok" if nildb.data_download() else "nok"
+        return nildb.data_download()
+
