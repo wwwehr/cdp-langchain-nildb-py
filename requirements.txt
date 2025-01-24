@@ -92,3 +92,4 @@ waterbear==2.6.8
 web3==7.7.0
 websockets==13.1
 yarl==1.18.3
+langchain-anthropic==0.3.4

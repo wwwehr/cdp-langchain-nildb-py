@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 import json
 
 from lib.nildb import NilDbUploadTool, NilDbDownloadTool
-import pprint
 
 load_dotenv()
 
@@ -43,6 +42,7 @@ def ask_agent():
     i = 0
     red_poem = ''
     blue_poem = ''
+    purple_poem = ''
     for chunk in agent_executor.stream(
         {"messages": [HumanMessage(content="download from nildb")]},
         {"configurable": {"thread_id": "my_first_agent"}},
@@ -55,14 +55,16 @@ def ask_agent():
             d = json.loads(chunk['tools']['messages'][0].content)
             red_poem = d['red']
             blue_poem = d['blue']
+            purple_poem = d['purple']
             print('[Red Team Poem]:', red_poem)
             print('[Blue Team Poem]:', blue_poem.strip('\n'))
+            print('[Purple Team Poem]:', purple_poem.strip('\n'))
             break
         i += 1
     print('Judging ...')
     # Judge
     for chunk in agent_executor.stream(
-        {"messages": [HumanMessage(content=f"red poem: {red_poem}. blue poem: {blue_poem}. Do you prefer red or blue? Give a score for each.")]},
+            {"messages": [HumanMessage(content=f"red poem: {red_poem}. blue poem: {blue_poem}. purple poem: {purple_poem}. Do you prefer red or blue or purple? Give a score for each.")]},
         {"configurable": {"thread_id": "judge"}},
     ):
         print("Response:", chunk["agent"]["messages"][0].content)
