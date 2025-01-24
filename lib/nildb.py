@@ -111,7 +111,7 @@ class NilDBAPI:
 
                 assert (
                     response.status_code == 200
-                    and response.json().get("data", {}).get("errors", []) == []
+                    and response.json().get("errors", []) == []
                 ), ("upload failed: " + response.content)
             return True
         except Exception as e:
@@ -137,7 +137,7 @@ class NilDbUploadTool(BaseTool):
         return (
             "ok"
             if nildb.data_upload(
-                payload={"_id": my_id, "team": CONFIG["team"], "text": text}
+                payload={"_id": my_id, "contest": CONFIG["contest"], "team": CONFIG["team"], "text": text}
             )
             else "nok"
         )
