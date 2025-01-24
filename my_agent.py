@@ -9,6 +9,18 @@ from lib.nildb import NilDbUploadTool, NilDbDownloadTool
 
 load_dotenv()
 
+PROMPT = '''
+Write a poem about the beauty of transformation and renewal, drawing inspiration from nature (e.g., seasons, butterflies, or rivers). The poem should follow these criteria:
+
+Structure: Four quatrains (four-line stanzas).
+Meter: Iambic tetrameter (four iambic feet per line).
+Rhyme Scheme: ABAB for each stanza.
+Content Requirements: Include vivid imagery of a natural process of change, such as leaves falling and regrowing, or a river carving a new path. Incorporate themes of hope and resilience.
+Tone: Reflective and uplifting, with a focus on the positive aspects of transformation.
+The poem should use evocative language and focus on painting a clear mental image for the reader. 
+Upload the generated poem to nildb
+'''
+
 # Initialize the LLM
 # if you want to support Claude, for example, you can replace this line with llm = ChatAnthropic(model="claude-3-5-sonnet-20240620"), replace the `from langchain_openai...` import with `from langchain_anthropic import ChatAnthropic`, and run in your terminal `export ANTHROPIC_API_KEY="your-api-key"
 llm = ChatOpenAI(model="gpt-4o-mini")
@@ -32,7 +44,7 @@ tools.append(nildb_download)
 agent_executor = create_react_agent(
     llm,
     tools=tools,
-    state_modifier="You are a helpful agent that can interact with the Base blockchain using CDP AgentKit. You can create wallets, deploy tokens, and perform transactions.",
+    state_modifier=PROMPT
 )
 
 # Function to interact with the agent
