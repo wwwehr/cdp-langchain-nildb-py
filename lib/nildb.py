@@ -71,15 +71,13 @@ class NilDBAPI:
             for k in shares:
                 decrypted.append(nilql.decrypt(self.secret_key, shares[k]))
             messages = {}
+            judged = {"blue": True, "purple": True, "red": True}
             for team, message in zip(teams, decrypted):
-                if len(messages) == 2:
+                if len(messages) == len(judged):
                     break
-                if teams[team] == "blue":
-                    messages["blue"] = message
-                elif teams[team] == "purple":
-                    messages["purple"] = message
-                elif teams[team] == "red":
-                    messages["red"] = message
+                if teams[team] in judged and judged[teams[team]]:
+                    messages[teams[team]] = message
+                    judged[teams[team]] = False
             return messages
         except Exception as e:
             print(f"Error retrieving records in node {idx}: {str(e)}")

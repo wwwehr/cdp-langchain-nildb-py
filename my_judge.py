@@ -56,7 +56,7 @@ def ask_agent():
             red_poem = d['red']
             blue_poem = d['blue']
             purple_poem = d['purple']
-            print('[Red Team Poem]:', red_poem)
+            print('[Red Team Poem]:', red_poem.strip('\n'))
             print('[Blue Team Poem]:', blue_poem.strip('\n'))
             print('[Purple Team Poem]:', purple_poem.strip('\n'))
             break
@@ -71,9 +71,9 @@ def ask_agent():
 
 # Test the agent
 if __name__ == "__main__":
-    print("Judge Agent is ready! Type 'exit' to quit.")
+    print("Judge Agent is ready! Type 'n' to quit.")
     while True:
-        user_input = input("\nJudge (y/n):")
+        user_input = input("\nJudge (y/n): ")
         if user_input.lower() == "n":
             break
         elif user_input.lower() == "y":
