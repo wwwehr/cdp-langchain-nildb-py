@@ -1,4 +1,5 @@
 {
+  "contest": <contest label>,
   "team": <team name>,
   "schema_id": <schema id>,
   "hosts": [

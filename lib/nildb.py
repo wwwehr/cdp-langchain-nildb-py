@@ -28,7 +28,7 @@ requests_log.propagate = True
 
 JSON_TYPE = Dict[str, Union[str, int, float, bool, None, List, Dict]]
 
-with open(os.environ.get("NILDB_CONFIG", ".nildb.config.json")) as fh:
+with open(os.environ.get("NILLION_DB_CONFIG_FILEPATH", ".nildb.config.json")) as fh:
     CONFIG = json.load(fh)
 
 
@@ -50,7 +50,7 @@ class NilDBAPI:
                     "Content-Type": "application/json",
                 }
 
-                body = {"schema": CONFIG["schema_id"], "filter": {}}
+                body = {"schema": CONFIG["schema_id"], "filter": {"contest": CONFIG["contest"]}}
 
                 response = requests.post(
                     f"https://{node['url']}/api/v1/data/read",
@@ -76,6 +76,8 @@ class NilDBAPI:
                     break
                 if teams[team] == "blue":
                     messages["blue"] = message
+                elif teams[team] == "purple":
+                    messages["purple"] = message
                 elif teams[team] == "red":
                     messages["red"] = message
             return messages
