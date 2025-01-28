@@ -5,11 +5,11 @@ from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage
 from dotenv import load_dotenv
 
-from lib.nildb import NilDbUploadTool, NilDbDownloadTool
+from lib.nildb import NilDbUploadTool, NilDbDownloadTool, NilDbSchemaCreateTool
 
 load_dotenv()
 
-PROMPT = '''
+PROMPT = """
 Write a poem about the beauty of transformation and renewal, drawing inspiration from nature (e.g., seasons, butterflies, or rivers). The poem should follow these criteria:
 
 Structure: Four quatrains (four-line stanzas).
@@ -19,12 +19,13 @@ Content Requirements: Include vivid imagery of a natural process of change, such
 Tone: Reflective and uplifting, with a focus on the positive aspects of transformation.
 The poem should use evocative language and focus on painting a clear mental image for the reader. 
 Upload the generated poem to nildb
-'''
+"""
 
 # Initialize the LLM
 # if you want to support Claude, for example, you can replace this line with llm = ChatAnthropic(model="claude-3-5-sonnet-20240620"), replace the `from langchain_openai...` import with `from langchain_anthropic import ChatAnthropic`, and run in your terminal `export ANTHROPIC_API_KEY="your-api-key"
 llm = ChatOpenAI(model="gpt-4o-mini")
 
+nildb_schema_create = NilDbSchemaCreateTool(llm)
 nildb_upload = NilDbUploadTool()
 nildb_download = NilDbDownloadTool()
 
@@ -37,15 +38,12 @@ cdp_toolkit = CdpToolkit.from_cdp_agentkit_wrapper(cdp)
 # Get all available tools
 tools = cdp_toolkit.get_tools()
 
+tools.append(nildb_schema_create)
 tools.append(nildb_upload)
 tools.append(nildb_download)
 
 # Create the agent
-agent_executor = create_react_agent(
-    llm,
-    tools=tools,
-    state_modifier=PROMPT
-)
+agent_executor = create_react_agent(llm, tools=tools, state_modifier=PROMPT)
 
 # Function to interact with the agent
 def ask_agent(question: str):
