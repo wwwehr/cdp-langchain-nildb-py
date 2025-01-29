@@ -13,6 +13,10 @@ import requests
 from typing import Union, Dict, List, Optional, Type
 import uuid
 
+import jwt
+import time
+from ecdsa import SigningKey, SECP256k1
+
 
 import nilql
 
@@ -51,10 +55,30 @@ class NilDBAPI:
 
     def __init__(self, llm: LLM_TYPE = None):
         self.nodes = CONFIG["hosts"]
+        self.init_jwt()
         self.secret_key = nilql.SecretKey.generate(
             {"nodes": [{}] * len(CONFIG["hosts"])}, {"store": True}
         )
         self.llm = llm
+
+    def init_jwt(self) -> bool:
+        """
+        Create JWTs signed with ES256K for multiple node_ids
+        """
+
+        # Convert the secret key from hex to bytes
+        private_key = bytes.fromhex(CONFIG["secret_key"])
+        signer = SigningKey.from_string(private_key, curve=SECP256k1)
+
+        for node in self.nodes:
+            # Create payload for each node_id
+            payload = {"iss": CONFIG["owner_id"], "aud": node["name"], "exp": int(time.time()) + 3600}
+
+            # Create and sign the JWT
+            node["bearer"] = jwt.encode(payload, signer.to_pem(), algorithm="ES256K")
+            print(f"Generated JWT for {node['name']}")
+
+        return True
 
     def create_schema(self, schema_description: str) -> bool:
         """Creates a JSON schema based on input description and uploads it to nildb"""
@@ -64,13 +88,23 @@ class NilDBAPI:
             schema_prompt = f"""
             1. I'll provide you with a description of the schema I want to implement
             2. Using the structure I define below supplemented by an example for adding schema definitions, please generate the JSON schema in JSON format
-            3. For any fields that could be considered financial, secret, political, family values, sexual, criminal, risky, personal, private or personally 
-               identifying (PII), I want you to replace that value, instead, with an object that has a key named `$share` and the value of string as shown in this example:
-            
-               "$share": {{
-                   "type": "string",
-                   "description": "a description of the field itself"
-               }}
+            3. For any fields that could be considered financial, secret, currency, value holding, political, family values, sexual, criminal, risky, personal, private or personally 
+               identifying (PII), I want you to replace that type and value, instead, with an object that has a key named `$share` and the value of string as shown in this example:
+
+                ORIGINAL ATTRIBUTE:
+                "password": {{
+                  "type": "string"
+                }}
+
+                REPLACED WITH UPDATED ATTRIBUTE PRESERVING NAME:
+                "password": {{
+                    "type": "object",
+                    "properties": {{
+                        "$share": {{
+                          "type": "string",
+                         }}
+                     }}
+                }}
             
             4. The JSON document should follow the patterns shown in these examples contained herein where the final result is ready to be included in the POST JSON payload
             5. Do not include explanation or comments. Only a valid JSON payload document.
@@ -126,6 +160,7 @@ class NilDBAPI:
             schema = json.loads(response.content)
 
             schema["_id"] = str(uuid.uuid4())
+            schema["owner"] = CONFIG["owner_id"]
 
             print(json.dumps(schema, indent=4))
 
