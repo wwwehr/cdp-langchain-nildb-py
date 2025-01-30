@@ -1,3 +1,4 @@
+from pdb import set_trace as bp
 from langchain_openai import ChatOpenAI
 from cdp_langchain.agent_toolkits import CdpToolkit
 from cdp_langchain.utils import CdpAgentkitWrapper
@@ -5,7 +6,7 @@ from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage
 from dotenv import load_dotenv
 
-from lib.nildb import NilDbUploadTool, NilDbDownloadTool, NilDbSchemaCreateTool
+from lib.nildb import NilDbUploadTool, NilDbDownloadTool, NilDbSchemaCreateTool, NilDbSchemaLookupTool
 
 load_dotenv()
 
@@ -18,7 +19,9 @@ Rhyme Scheme: ABAB for each stanza.
 Content Requirements: Include vivid imagery of a natural process of change, such as leaves falling and regrowing, or a river carving a new path. Incorporate themes of hope and resilience.
 Tone: Reflective and uplifting, with a focus on the positive aspects of transformation.
 The poem should use evocative language and focus on painting a clear mental image for the reader. 
-Upload the generated poem to nildb
+Upload the generated poem to nildb.
+
+Any time that you do not have a schema UUID, you should look one up or create a schema using the nildb tools.
 """
 
 # Initialize the LLM
@@ -26,6 +29,7 @@ Upload the generated poem to nildb
 llm = ChatOpenAI(model="gpt-4o-mini")
 
 nildb_schema_create = NilDbSchemaCreateTool(llm)
+nildb_schema_lookup = NilDbSchemaLookupTool(llm)
 nildb_upload = NilDbUploadTool()
 nildb_download = NilDbDownloadTool()
 
@@ -39,6 +43,7 @@ cdp_toolkit = CdpToolkit.from_cdp_agentkit_wrapper(cdp)
 tools = cdp_toolkit.get_tools()
 
 tools.append(nildb_schema_create)
+tools.append(nildb_schema_lookup)
 tools.append(nildb_upload)
 tools.append(nildb_download)
 
@@ -51,6 +56,7 @@ def ask_agent(question: str):
         {"messages": [HumanMessage(content=question)]},
         {"configurable": {"thread_id": "my_first_agent"}},
     ):
+        bp()
         if "agent" in chunk:
             print(chunk["agent"]["messages"][0].content)
         elif "tools" in chunk:

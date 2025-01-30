@@ -72,22 +72,66 @@ class NilDBAPI:
 
         for node in self.nodes:
             # Create payload for each node_id
-            payload = {"iss": CONFIG["owner_id"], "aud": node["name"], "exp": int(time.time()) + 3600}
+            payload = {
+                "iss": CONFIG["owner_id"],
+                "aud": node["name"],
+                "exp": int(time.time()) + 3600,
+            }
 
             # Create and sign the JWT
             node["bearer"] = jwt.encode(payload, signer.to_pem(), algorithm="ES256K")
-            print(f"Generated JWT for {node['name']}")
 
         return True
 
+    def lookup_schema(self, schema_description: str) -> str:
+        """Lookup a JSON schema based on input description and return it's UUID"""
+        print(f"fn:lookup_schema [{schema_description}]")
+        try:
+
+            headers = {
+                "Authorization": f'Bearer {self.nodes[0]["bearer"]}',
+                "Content-Type": "application/json",
+            }
+
+            response = requests.get(
+                f"https://{self.nodes[0]['url']}/api/v1/schemas", headers=headers
+            )
+
+            assert (
+                response.status_code == 200 and response.json().get("errors", []) == []
+            ), response.content.decode("utf8")
+
+            schema_prompt = f"""
+            1. I'll provide you with a description of the schema I want to use
+            2. I'll provide you with a list of available schemas
+            3. You will select the best match and return the associated UUID from the outermost `_id` field
+            4. Do not include explanation or comments. Only a valid UUID string
+            5. Based on the provided description, select a schema from the provided schemas.
+
+            DESIRED SCHEMA DESCRIPTION:
+            {schema_description}
+
+            AVAILABLE SCHEMAS:
+            {response.text}
+            """
+
+            response = self.llm.invoke(schema_prompt)
+
+            print(response.content)
+            return response.content
+
+        except Exception as e:
+            print(f"Error creating schema: {str(e)}")
+            return False
+
     def create_schema(self, schema_description: str) -> bool:
         """Creates a JSON schema based on input description and uploads it to nildb"""
+        print(f"fn:create_schema [{schema_description}]")
 
         try:
 
             schema_prompt = f"""
             1. I'll provide you with a description of the schema I want to implement
-            2. Using the structure I define below supplemented by an example for adding schema definitions, please generate the JSON schema in JSON format
             3. For any fields that could be considered financial, secret, currency, value holding, political, family values, sexual, criminal, risky, personal, private or personally 
                identifying (PII), I want you to replace that type and value, instead, with an object that has a key named `$share` and the value of string as shown in this example:
 
@@ -185,8 +229,9 @@ class NilDBAPI:
             print(f"Error creating schema: {str(e)}")
             return False
 
-    def data_download(self) -> Dict:
+    def data_download(self, schema_id: str) -> Dict:
         """Download all records in the specified node and schema."""
+        print(f"fn:data_download [{schema_id}]")
         try:
             shares = defaultdict(list)
             teams = defaultdict(list)
@@ -197,7 +242,7 @@ class NilDBAPI:
                 }
 
                 body = {
-                    "schema": CONFIG["schema_id"],
+                    "schema": schema_id,
                     "filter": {"contest": CONFIG["contest"]},
                 }
 
@@ -230,13 +275,16 @@ class NilDBAPI:
             print(f"Error retrieving records in node {idx}: {str(e)}")
             return {}
 
-    def data_upload(self, payload: JSON_TYPE) -> bool:
+    def data_upload(self, schema_id: str, payload: JSON_TYPE) -> bool:
         """Create/upload records in the specified node and schema."""
+        print(f"fn:data_upload [{schema_id}] [{payload}]")
         try:
             print(json.dumps(payload))
+
             payload["text"] = {
                 "$allot": nilql.encrypt(self.secret_key, payload["text"])
             }
+
             payloads = nilql.allot(payload)
             for idx, shard in enumerate(payloads):
                 node = self.nodes[idx]
@@ -245,7 +293,7 @@ class NilDBAPI:
                     "Content-Type": "application/json",
                 }
 
-                body = {"schema": CONFIG["schema_id"], "data": [shard]}
+                body = {"schema": schema_id, "data": [shard]}
 
                 response = requests.post(
                     f"https://{node['url']}/api/v1/data/create",
@@ -265,8 +313,28 @@ class NilDBAPI:
 
 class NilDbSchemainput(BaseModel):
     schema_description: str = Field(
-        description="a complete description of what schema to create and post to nildb"
+        description="a complete description of the desired nildb schema"
     )
+
+
+class NilDbSchemaLookupTool(BaseToolWithLlm):
+    name: str = "nildb_schema_lookup_tool"
+    description: str = """In addition, you can lookup schemas in your privacy preserving database based on an input string using the nildb_schema_lookup_tool"""
+    args_schema: Type[BaseModel] = NilDbSchemainput
+    return_direct: bool = True
+
+    def _run(
+        self,
+        schema_description: str,
+        run_manager: Optional[CallbackManagerForToolRun] = None,
+    ) -> str:
+        nildb = NilDBAPI(self.llm)
+
+        return (
+            "ok"
+            if nildb.lookup_schema(schema_description=schema_description)
+            else "nok"
+        )
 
 
 class NilDbSchemaCreateTool(BaseToolWithLlm):
@@ -290,6 +358,7 @@ class NilDbSchemaCreateTool(BaseToolWithLlm):
 
 
 class NilDbUploadInput(BaseModel):
+    schema_id: str = Field(description="the UUID of the nildb schema")
     text: str = Field(description="value to store")
 
 
@@ -300,7 +369,10 @@ class NilDbUploadTool(BaseTool):
     return_direct: bool = True
 
     def _run(
-        self, text: str, run_manager: Optional[CallbackManagerForToolRun] = None
+        self,
+        schema_id: str,
+        text: str,
+        run_manager: Optional[CallbackManagerForToolRun] = None,
     ) -> str:
         nildb = NilDBAPI()
         my_id = str(uuid.uuid4())
@@ -308,12 +380,13 @@ class NilDbUploadTool(BaseTool):
         return (
             "ok"
             if nildb.data_upload(
+                schema_id=schema_id,
                 payload={
                     "_id": my_id,
                     "contest": CONFIG["contest"],
                     "team": CONFIG["team"],
                     "text": text,
-                }
+                },
             )
             else "nok"
         )
@@ -324,7 +397,7 @@ class NilDbDownloadInput(BaseModel):
 
 
 class NilDbDownload(BaseModel):
-    text: str = Field(description="value to fetch")
+    schema_id: str = Field(description="the UUID of the nildb schema")
 
 
 class NilDbDownloadTool(BaseTool):
@@ -333,8 +406,10 @@ class NilDbDownloadTool(BaseTool):
     args_schema: Type[BaseModel] = NilDbDownloadInput
     return_direct: bool = True
 
-    def _run(self, run_manager: Optional[CallbackManagerForToolRun] = None) -> Dict:
+    def _run(
+        self, schema_id: str = "", run_manager: Optional[CallbackManagerForToolRun] = None
+    ) -> Dict:
 
         nildb = NilDBAPI()
 
-        return nildb.data_download()
+        return nildb.data_download(schema_id)
