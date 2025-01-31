@@ -1,15 +1,6 @@
 {
   "contest": <contest label>,
   "secret_key": <your org private key>,
-  "owner_id": <your org did>,
-  "team": <team name>,
-  "schema_id": <schema id>,
-  "hosts": [
-    {
-      "name": <nildb node did>,
-      "url": <nildb node hostname>,
-    },
-    ...
-  ],
-  "schema": <your json schema>
+  "org_did": <your org did>,
+  "team": <team name>
 }

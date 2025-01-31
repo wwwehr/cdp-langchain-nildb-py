@@ -54,10 +54,9 @@ class NilDBAPI:
     llm: LLM_TYPE = None
 
     def __init__(self, llm: LLM_TYPE = None):
-        self.nodes = CONFIG["hosts"]
         self.init_jwt()
         self.secret_key = nilql.SecretKey.generate(
-            {"nodes": [{}] * len(CONFIG["hosts"])}, {"store": True}
+            {"nodes": [{}] * len(self.nodes)}, {"store": True}
         )
         self.llm = llm
 
@@ -66,6 +65,15 @@ class NilDBAPI:
         Create JWTs signed with ES256K for multiple node_ids
         """
 
+        response = requests.post(
+            "https://sv-sda-registration.replit.app/api/config",
+            headers={
+                "Content-Type": "application/json",
+            },
+            json={"org_did": CONFIG["org_did"]},
+        )
+        self.nodes = response.json()["nodes"]
+
         # Convert the secret key from hex to bytes
         private_key = bytes.fromhex(CONFIG["secret_key"])
         signer = SigningKey.from_string(private_key, curve=SECP256k1)
@@ -73,14 +81,15 @@ class NilDBAPI:
         for node in self.nodes:
             # Create payload for each node_id
             payload = {
-                "iss": CONFIG["owner_id"],
-                "aud": node["name"],
+                "iss": CONFIG["org_did"],
+                "aud": node["did"],
                 "exp": int(time.time()) + 3600,
             }
 
             # Create and sign the JWT
             node["bearer"] = jwt.encode(payload, signer.to_pem(), algorithm="ES256K")
 
+        bp()
         return True
 
     def lookup_schema(self, schema_description: str) -> str:
@@ -204,7 +213,7 @@ class NilDBAPI:
             schema = json.loads(response.content)
 
             schema["_id"] = str(uuid.uuid4())
-            schema["owner"] = CONFIG["owner_id"]
+            schema["owner"] = CONFIG["org_did"]
 
             print(json.dumps(schema, indent=4))
 
@@ -215,7 +224,7 @@ class NilDBAPI:
                 }
 
                 response = requests.post(
-                    f"https://{node['url']}/api/v1/schemas",
+                    f"{node['url']}/api/v1/schemas",
                     headers=headers,
                     json=schema,
                 )
@@ -247,7 +256,7 @@ class NilDBAPI:
                 }
 
                 response = requests.post(
-                    f"https://{node['url']}/api/v1/data/read",
+                    f"{node['url']}/api/v1/data/read",
                     headers=headers,
                     json=body,
                 )
@@ -296,7 +305,7 @@ class NilDBAPI:
                 body = {"schema": schema_id, "data": [shard]}
 
                 response = requests.post(
-                    f"https://{node['url']}/api/v1/data/create",
+                    f"{node['url']}/api/v1/data/create",
                     headers=headers,
                     json=body,
                 )
@@ -407,7 +416,9 @@ class NilDbDownloadTool(BaseTool):
     return_direct: bool = True
 
     def _run(
-        self, schema_id: str = "", run_manager: Optional[CallbackManagerForToolRun] = None
+        self,
+        schema_id: str = "",
+        run_manager: Optional[CallbackManagerForToolRun] = None,
     ) -> Dict:
 
         nildb = NilDBAPI()
