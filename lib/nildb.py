@@ -57,6 +57,7 @@ class NilDBAPI:
 
     def __init__(self, llm: LLM_TYPE = None):
         self.init_jwt()
+        print(f"initializing for secret sharing across {len(self.nodes)} nodes")
         self.secret_key = nilql.SecretKey.generate(
             {"nodes": [{}] * len(self.nodes)}, {"store": True}
         )
@@ -135,6 +136,8 @@ class NilDBAPI:
                 response.status_code == 200 and response.json().get("errors", []) == []
             ), response.content.decode("utf8")
 
+            schema_list = response.json()["data"]
+
             schema_prompt = f"""
             1. I'll provide you with a description of the schema I want to use
             2. I'll provide you with a list of available schemas
@@ -152,12 +155,12 @@ class NilDBAPI:
             response = self.llm.invoke(schema_prompt)
 
             my_uuid = response.content
-            my_schema = self._filter_schemas(my_uuid, response.json()["data"])
+            my_schema = self._filter_schemas(my_uuid, schema_list)
             return my_uuid, my_schema
 
         except Exception as e:
-            print(f"Error creating schema: {str(e)}")
-            return False
+            print(f"Error looking up schema: {str(e)}")
+            return False, False
 
     def create_schema(self, schema_description: str) -> dict:
         """Creates a JSON schema based on input description and uploads it to nildb"""
@@ -267,7 +270,6 @@ class NilDBAPI:
         print(f"fn:data_download [{schema_id}]")
         try:
             shares = defaultdict(list)
-            teams = defaultdict(list)
             for idx, node in enumerate(self.nodes):
                 headers = {
                     "Authorization": f'Bearer {node["bearer"]}',
@@ -276,7 +278,7 @@ class NilDBAPI:
 
                 body = {
                     "schema": schema_id,
-                    "filter": {"contest": CONFIG["contest"]},
+                    "filter": {},
                 }
 
                 response = requests.post(
@@ -289,25 +291,13 @@ class NilDBAPI:
                 ), "upload failed: " + response.content.decode("utf8")
                 data = response.json().get("data")
                 for i, d in enumerate(data):
-                    shares[i].append(d["text"]["$share"])
-                    teams[i].append(d["team"])
-            for i in range(len(teams)):
-                assert (teams[i][0] == teams[i][j] for j in range(1, len(teams[i])))
-                teams[i] = teams[i][0]
+                    shares[d["_id"]].append(d)
             decrypted = []
-            for k in shares:
+            for k in shares.keys():
                 decrypted.append(nilql.decrypt(self.secret_key, shares[k]))
-            messages = {}
-            judged = {"blue": True, "purple": True, "red": True}
-            for team, message in zip(teams, decrypted):
-                if len(messages) == len(judged):
-                    break
-                if teams[team] in judged and judged[teams[team]]:
-                    messages[teams[team]] = message
-                    judged[teams[team]] = False
-            return messages
+            return decrypted
         except Exception as e:
-            print(f"Error retrieving records in node {idx}: {str(e)}")
+            print(f"Error retrieving records in node: {str(e)}")
             return {}
 
     def data_upload(self, schema_uuid: str, payload: list) -> bool:
@@ -409,7 +399,7 @@ class NilDbUploadInput(BaseModel):
 
 class NilDbUploadTool(BaseTool):
     name: str = "nildb_upload_tool"
-    description: str = """In addition, you can upload data into a privacy preserving database using the nildb_upload_tool"""
+    description: str = """In addition, you can upload data into a privacy preserving database using the nildb_upload_tool. The _id field should always be a UUID."""
     args_schema: Type[BaseModel] = NilDbUploadInput
     return_direct: bool = True
 
