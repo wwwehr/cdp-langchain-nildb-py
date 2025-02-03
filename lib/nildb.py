@@ -1,6 +1,8 @@
 from pdb import set_trace as bp
 from collections import defaultdict
+from copy import deepcopy
 import json
+from jsonschema import validators, Draft7Validator
 from langchain.llms import BaseLLM
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.callbacks import (
@@ -89,10 +91,33 @@ class NilDBAPI:
             # Create and sign the JWT
             node["bearer"] = jwt.encode(payload, signer.to_pem(), algorithm="ES256K")
 
-        bp()
         return True
 
-    def lookup_schema(self, schema_description: str) -> str:
+
+    def mutate_secret_attributes(self, entry: dict) -> None:
+        keys = list(entry.keys())
+        for key in keys:
+            value = entry[key]
+            if key == "$share":
+                del entry["$share"]
+                entry["$allot"] = nilql.encrypt(self.secret_key, value)
+            elif isinstance(value, dict):
+                self.mutate_secret_attributes(value)
+
+    def validator_builder(self):
+        """builds a validator to validate the candidate document against loaded schema"""
+        return validators.extend(Draft7Validator)
+
+    def _filter_schemas(self, schema_uuid: str, schema_list: list) -> dict:
+        my_schema = None
+        for this_schema in schema_list:
+            if this_schema["_id"] == schema_uuid:
+                my_schema = this_schema["schema"]
+                break
+        assert my_schema is not None, "failed to lookup schema"
+        return my_schema
+
+    def lookup_schema(self, schema_description: str) -> tuple:
         """Lookup a JSON schema based on input description and return it's UUID"""
         print(f"fn:lookup_schema [{schema_description}]")
         try:
@@ -103,7 +128,7 @@ class NilDBAPI:
             }
 
             response = requests.get(
-                f"https://{self.nodes[0]['url']}/api/v1/schemas", headers=headers
+                f"{self.nodes[0]['url']}/api/v1/schemas", headers=headers
             )
 
             assert (
@@ -126,14 +151,15 @@ class NilDBAPI:
 
             response = self.llm.invoke(schema_prompt)
 
-            print(response.content)
-            return response.content
+            my_uuid = response.content
+            my_schema = self._filter_schemas(my_uuid, response.json()["data"])
+            return my_uuid, my_schema
 
         except Exception as e:
             print(f"Error creating schema: {str(e)}")
             return False
 
-    def create_schema(self, schema_description: str) -> bool:
+    def create_schema(self, schema_description: str) -> dict:
         """Creates a JSON schema based on input description and uploads it to nildb"""
         print(f"fn:create_schema [{schema_description}]")
 
@@ -215,8 +241,6 @@ class NilDBAPI:
             schema["_id"] = str(uuid.uuid4())
             schema["owner"] = CONFIG["org_did"]
 
-            print(json.dumps(schema, indent=4))
-
             for node in self.nodes:
                 headers = {
                     "Authorization": f'Bearer {node["bearer"]}',
@@ -233,10 +257,10 @@ class NilDBAPI:
                     response.status_code == 200
                     and response.json().get("errors", []) == []
                 ), response.content.decode("utf8")
-            return True
+            return schema
         except Exception as e:
             print(f"Error creating schema: {str(e)}")
-            return False
+            return ""
 
     def data_download(self, schema_id: str) -> Dict:
         """Download all records in the specified node and schema."""
@@ -260,7 +284,9 @@ class NilDBAPI:
                     headers=headers,
                     json=body,
                 )
-                assert response.status_code == 200, "upload failed: " + response.content
+                assert (
+                    response.status_code == 200
+                ), "upload failed: " + response.content.decode("utf8")
                 data = response.json().get("data")
                 for i, d in enumerate(data):
                     shares[i].append(d["text"]["$share"])
@@ -284,25 +310,41 @@ class NilDBAPI:
             print(f"Error retrieving records in node {idx}: {str(e)}")
             return {}
 
-    def data_upload(self, schema_id: str, payload: JSON_TYPE) -> bool:
+    def data_upload(self, schema_uuid: str, payload: list) -> bool:
         """Create/upload records in the specified node and schema."""
-        print(f"fn:data_upload [{schema_id}] [{payload}]")
+        print(f"fn:data_upload [{schema_uuid}] [{payload}]")
         try:
-            print(json.dumps(payload))
 
-            payload["text"] = {
-                "$allot": nilql.encrypt(self.secret_key, payload["text"])
+            headers = {
+                "Authorization": f'Bearer {self.nodes[0]["bearer"]}',
+                "Content-Type": "application/json",
             }
 
+            response = requests.get(
+                f"{self.nodes[0]['url']}/api/v1/schemas", headers=headers
+            )
+
+            my_schema = self._filter_schemas(schema_uuid, response.json()["data"])
+
+            builder = self.validator_builder()
+            validator = builder(my_schema)
+
+            for entry in payload:
+                self.mutate_secret_attributes(entry)
+
             payloads = nilql.allot(payload)
+
             for idx, shard in enumerate(payloads):
+
+                validator.validate(shard)
+
                 node = self.nodes[idx]
                 headers = {
                     "Authorization": f'Bearer {node["bearer"]}',
                     "Content-Type": "application/json",
                 }
 
-                body = {"schema": schema_id, "data": [shard]}
+                body = {"schema": schema_uuid, "data": shard}
 
                 response = requests.post(
                     f"{node['url']}/api/v1/data/create",
@@ -313,10 +355,10 @@ class NilDBAPI:
                 assert (
                     response.status_code == 200
                     and response.json().get("errors", []) == []
-                ), ("upload failed: " + response.content)
+                ), "upload failed: " + response.content.decode("utf8")
             return True
         except Exception as e:
-            print(f"Error creating records in node {idx}: {str(e)}")
+            print(f"Error creating records in node: {str(e)}")
             return False
 
 
@@ -328,47 +370,41 @@ class NilDbSchemainput(BaseModel):
 
 class NilDbSchemaLookupTool(BaseToolWithLlm):
     name: str = "nildb_schema_lookup_tool"
-    description: str = """In addition, you can lookup schemas in your privacy preserving database based on an input string using the nildb_schema_lookup_tool"""
+    description: str = """In addition, you can lookup schemas in your privacy preserving database based on an input string using the nildb_schema_lookup_tool. Remember the UUID and schema values for future use with nildb_upload_tool and nildb_download_tool"""
     args_schema: Type[BaseModel] = NilDbSchemainput
-    return_direct: bool = True
+    return_direct: bool = False
 
     def _run(
         self,
         schema_description: str,
         run_manager: Optional[CallbackManagerForToolRun] = None,
-    ) -> str:
+    ) -> tuple:
         nildb = NilDBAPI(self.llm)
 
-        return (
-            "ok"
-            if nildb.lookup_schema(schema_description=schema_description)
-            else "nok"
-        )
+        return nildb.lookup_schema(schema_description=schema_description)
 
 
 class NilDbSchemaCreateTool(BaseToolWithLlm):
     name: str = "nildb_schema_create_tool"
     description: str = """In addition, you can create schemas in your privacy preserving database based on an input string using the nildb_schema_create_tool"""
     args_schema: Type[BaseModel] = NilDbSchemainput
-    return_direct: bool = True
+    return_direct: bool = False
 
     def _run(
         self,
         schema_description: str,
         run_manager: Optional[CallbackManagerForToolRun] = None,
-    ) -> str:
+    ) -> dict:
         nildb = NilDBAPI(self.llm)
 
-        return (
-            "ok"
-            if nildb.create_schema(schema_description=schema_description)
-            else "nok"
-        )
+        return nildb.create_schema(schema_description=schema_description)
 
 
 class NilDbUploadInput(BaseModel):
-    schema_id: str = Field(description="the UUID of the nildb schema")
-    text: str = Field(description="value to store")
+    schema_uuid: str = Field(
+        description="the UUID obtained from the nildb_schema_lookup_tool"
+    )
+    data_to_store: list = Field(description="data to store in nildb that matches schema")
 
 
 class NilDbUploadTool(BaseTool):
@@ -379,34 +415,27 @@ class NilDbUploadTool(BaseTool):
 
     def _run(
         self,
-        schema_id: str,
-        text: str,
+        schema_uuid: str,
+        data_to_store: list,
         run_manager: Optional[CallbackManagerForToolRun] = None,
     ) -> str:
+
         nildb = NilDBAPI()
-        my_id = str(uuid.uuid4())
 
         return (
             "ok"
             if nildb.data_upload(
-                schema_id=schema_id,
-                payload={
-                    "_id": my_id,
-                    "contest": CONFIG["contest"],
-                    "team": CONFIG["team"],
-                    "text": text,
-                },
+                schema_uuid=schema_uuid,
+                payload=data_to_store
             )
             else "nok"
         )
 
 
 class NilDbDownloadInput(BaseModel):
-    pass
-
-
-class NilDbDownload(BaseModel):
-    schema_id: str = Field(description="the UUID of the nildb schema")
+    schema_uuid: str = Field(
+        description="the UUID obtained from the nildb_schema_lookup_tool"
+    )
 
 
 class NilDbDownloadTool(BaseTool):
@@ -417,10 +446,10 @@ class NilDbDownloadTool(BaseTool):
 
     def _run(
         self,
-        schema_id: str = "",
+        schema_uuid: str = "",
         run_manager: Optional[CallbackManagerForToolRun] = None,
     ) -> Dict:
 
         nildb = NilDBAPI()
 
-        return nildb.data_download(schema_id)
+        return nildb.data_download(schema_uuid)

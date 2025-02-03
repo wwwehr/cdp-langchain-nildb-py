@@ -2,6 +2,7 @@ from pdb import set_trace as bp
 from langchain_openai import ChatOpenAI
 from cdp_langchain.agent_toolkits import CdpToolkit
 from cdp_langchain.utils import CdpAgentkitWrapper
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage
 from dotenv import load_dotenv
@@ -21,7 +22,7 @@ Tone: Reflective and uplifting, with a focus on the positive aspects of transfor
 The poem should use evocative language and focus on painting a clear mental image for the reader. 
 Upload the generated poem to nildb.
 
-Any time that you do not have a schema UUID, you should look one up or create a schema using the nildb tools.
+For nildb_upload_tool and nildb_download_tool you must have a schema_uuid which is a UUID which is obtained via the nildb_schema_lookup_tool. You must remember it so that you can use it with the upload or download tool actions.
 """
 
 # Initialize the LLM
@@ -48,7 +49,8 @@ tools.append(nildb_upload)
 tools.append(nildb_download)
 
 # Create the agent
-agent_executor = create_react_agent(llm, tools=tools, state_modifier=PROMPT)
+memory = MemorySaver()
+agent_executor = create_react_agent(llm, checkpointer=memory, tools=tools, state_modifier=PROMPT)
 
 # Function to interact with the agent
 def ask_agent(question: str):
@@ -56,7 +58,6 @@ def ask_agent(question: str):
         {"messages": [HumanMessage(content=question)]},
         {"configurable": {"thread_id": "my_first_agent"}},
     ):
-        bp()
         if "agent" in chunk:
             print(chunk["agent"]["messages"][0].content)
         elif "tools" in chunk:
