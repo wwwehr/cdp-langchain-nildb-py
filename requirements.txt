@@ -54,7 +54,6 @@ langgraph-sdk==0.1.51
 langsmith==0.2.11
 msgpack==1.1.0
 multidict==6.1.0
-nilql @ git+https://github.com/NillionNetwork/nilql-py.git@a725890d58e549ea5a2cd4f39c2753e0ca8f4f74
 numpy==1.26.4
 openai==1.59.9
 orjson==3.10.15
@@ -93,3 +92,4 @@ web3==7.7.0
 websockets==13.1
 yarl==1.18.3
 langchain-anthropic==0.3.4
+nilql @ git+https://github.com/NillionNetwork/nilql-py.git@fbf98207737de9317fbd55a62257441db95eda4f
