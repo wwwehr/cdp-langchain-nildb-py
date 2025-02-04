@@ -58,7 +58,7 @@ class NilDBAPI:
     def __init__(self, llm: LLM_TYPE = None):
         self.init_jwt()
         print(f"initializing for secret sharing across {len(self.nodes)} nodes")
-        self.secret_key = nilql.SecretKey.generate(
+        self.cluster_key = nilql.ClusterKey.generate(
             {"nodes": [{}] * len(self.nodes)}, {"store": True}
         )
         self.llm = llm
@@ -94,14 +94,13 @@ class NilDBAPI:
 
         return True
 
-
     def mutate_secret_attributes(self, entry: dict) -> None:
         keys = list(entry.keys())
         for key in keys:
             value = entry[key]
             if key == "$share":
                 del entry["$share"]
-                entry["$allot"] = nilql.encrypt(self.secret_key, value)
+                entry["$allot"] = nilql.encrypt(self.cluster_key, value)
             elif isinstance(value, dict):
                 self.mutate_secret_attributes(value)
 
@@ -137,6 +136,7 @@ class NilDBAPI:
             ), response.content.decode("utf8")
 
             schema_list = response.json()["data"]
+            assert len(schema_list) > 0, "failed to fetch schemas from nildb"
 
             schema_prompt = f"""
             1. I'll provide you with a description of the schema I want to use
@@ -155,12 +155,14 @@ class NilDBAPI:
             response = self.llm.invoke(schema_prompt)
 
             my_uuid = response.content
+            my_uuid = "".join(c for c in my_uuid if c.lower() in "0123456789abcdef-")
+
             my_schema = self._filter_schemas(my_uuid, schema_list)
             return my_uuid, my_schema
 
         except Exception as e:
             print(f"Error looking up schema: {str(e)}")
-            return False, False
+            return None
 
     def create_schema(self, schema_description: str) -> dict:
         """Creates a JSON schema based on input description and uploads it to nildb"""
@@ -294,7 +296,7 @@ class NilDBAPI:
                     shares[d["_id"]].append(d)
             decrypted = []
             for k in shares.keys():
-                decrypted.append(nilql.decrypt(self.secret_key, shares[k]))
+                decrypted.append(nilql.unify(self.cluster_key, shares[k]))
             return decrypted
         except Exception as e:
             print(f"Error retrieving records in node: {str(e)}")
@@ -394,12 +396,14 @@ class NilDbUploadInput(BaseModel):
     schema_uuid: str = Field(
         description="the UUID obtained from the nildb_schema_lookup_tool"
     )
-    data_to_store: list = Field(description="data to store in nildb that matches schema")
+    data_to_store: list = Field(
+        description="data to store in nildb that matches schema"
+    )
 
 
 class NilDbUploadTool(BaseTool):
     name: str = "nildb_upload_tool"
-    description: str = """In addition, you can upload data into a privacy preserving database using the nildb_upload_tool. The _id field should always be a UUID."""
+    description: str = """In addition, you can upload data into a privacy preserving database using the nildb_upload_tool. The _id field should always be a UUID4."""
     args_schema: Type[BaseModel] = NilDbUploadInput
     return_direct: bool = True
 
@@ -414,10 +418,7 @@ class NilDbUploadTool(BaseTool):
 
         return (
             "ok"
-            if nildb.data_upload(
-                schema_uuid=schema_uuid,
-                payload=data_to_store
-            )
+            if nildb.data_upload(schema_uuid=schema_uuid, payload=data_to_store)
             else "nok"
         )
 
